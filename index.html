@@ -15,8 +15,9 @@ h1 {
     margin-bottom: 10px;
 }
 
-input {
+input, button {
     margin-bottom: 20px;
+    margin-right: 10px;
 }
 
 .section {
@@ -47,6 +48,7 @@ th, td {
 th {
     background: #222;
 }
+
 tr.six { background: rgba(255, 0, 0, 0.4); }
 tr.five { background: rgba(255,215,0,0.15); }
 tr.four { background: rgba(138,43,226,0.15); }
@@ -59,11 +61,30 @@ tr.four { background: rgba(138,43,226,0.15); }
 <body>
 
 <h1>Endfield Gacha Analyzer</h1>
+
 <input type="file" id="fileInput" accept=".json">
+<button id="clearCacheBtn">Очистить кеш</button>
 
 <div id="content"></div>
 
 <script>
+window.addEventListener("DOMContentLoaded", () => {
+    try {
+        const raw = localStorage.getItem(STORAGE_KEY);
+        if (!raw) return;
+
+        const stored = JSON.parse(raw);
+
+        if (Array.isArray(stored)) {
+            render(stored);
+        }
+    } catch(e) {
+		console.warn("Битый кеш - удаляю");
+        localStorage.removeItem(STORAGE_KEY);
+    }
+});
+const STORAGE_KEY = "endfield_cache_simple";
+
 const fileInput = document.getElementById('fileInput');
 const content = document.getElementById('content');
 
@@ -72,34 +93,90 @@ fileInput.addEventListener('change', function() {
     if (!file) return;
 
     const reader = new FileReader();
+
     reader.onload = function(e) {
-        const json = JSON.parse(e.target.result);
-        const pulls = json.data?.list || json;
-        render(pulls);
+
+        let pulls;
+
+        try {
+            const json = JSON.parse(e.target.result);
+            pulls = Array.isArray(json) ? json : (json.data?.list || []);
+        } catch(err) {
+            alert("Ошибка JSON");
+            return;
+        }
+
+        mergeAndRender(pulls);
     };
+
     reader.readAsText(file);
 });
+const clearBtn = document.getElementById("clearCacheBtn");
+
+function mergeAndRender(newPulls) {
+
+    let stored = [];
+
+    try {
+        const raw = localStorage.getItem(STORAGE_KEY);
+        stored = raw ? JSON.parse(raw) : [];
+        if (!Array.isArray(stored)) stored = [];
+    } catch(e) {
+        localStorage.removeItem(STORAGE_KEY);
+        stored = [];
+    }
+
+    stored = stored.filter(p => p && p.seqId);
+
+    const existing = new Set(stored.map(p => String(p.seqId)));
+
+    newPulls.forEach(p => {
+        if (p && p.seqId && !existing.has(String(p.seqId))) {
+            stored.push(p);
+        }
+    });
+
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(stored));
+
+    render(stored);
+}
 
 function render(data) {
 
     content.innerHTML = "";
 
-    // сортировка по seqId
-    data.sort((a,b) => Number(a.seqId) - Number(b.seqId));
+	if (!Array.isArray(data)) return; 
 
-    // группировка по poolName
-    const pools = {};
+	data.sort((a, b) => Number(a.seqId || 0) - Number(b.seqId || 0));
+
+	const pools = {};
+
+
     data.forEach(pull => {
-        if (!pools[pull.poolName]) {
-            pools[pull.poolName] = [];
-        }
-        pools[pull.poolName].push(pull);
+        const pool = pull.poolName || "Unknown";
+        if (!pools[pool]) pools[pool] = [];
+        pools[pool].push(pull);
     });
 
-    for (const poolName in pools) {
-        createSection(poolName, pools[poolName]);
+    for (const pool in pools) {
+        createSection(pool, pools[pool]);
     }
 }
+
+clearBtn.addEventListener("click", () => {
+
+    if (!confirm("Удалить все сохранённые крутки?")) return;
+
+    try {
+        localStorage.removeItem(STORAGE_KEY);
+    } catch(e) {
+        console.warn("Ошибка очистки storage", e);
+    }
+
+    content.innerHTML = "";
+
+    alert("Кеш очищен");
+});
 
 function createSection(poolName, pulls) {
 
@@ -110,36 +187,18 @@ function createSection(poolName, pulls) {
     title.textContent = poolName;
     section.appendChild(title);
 
-    let total = pulls.length;
-    let fiveStars = 0;
-
-    pulls.forEach(p => {
-        if (p.rarity == 5) fiveStars++;
-    });
-
-    const stats = document.createElement("div");
-    stats.className = "stats";
-    stats.innerHTML = `
-        Всего круток: <b>${total}</b> |
-        5★: <b>${fiveStars}</b> |
-        Средний 5★: <b>${fiveStars ? (total / fiveStars).toFixed(1) : "-"}</b>
-    `;
-    section.appendChild(stats);
-
     const table = document.createElement("table");
 
-    table.innerHTML = `
-        <thead>
-            <tr>
-                <th>#</th>
-                <th>Дата</th>
-                <th>Персонаж</th>
-                <th>Редкость</th>
-                <th>SeqID</th>
-            </tr>
-        </thead>
-        <tbody></tbody>
-    `;
+    table.innerHTML =
+        "<thead>" +
+        "<tr>" +
+        "<th>#</th>" +
+        "<th>Дата</th>" +
+        "<th>Персонаж</th>" +
+        "<th>Редкость</th>" +
+        "<th>SeqID</th>" +
+        "</tr>" +
+        "</thead><tbody></tbody>";
 
     const tbody = table.querySelector("tbody");
 
@@ -147,20 +206,19 @@ function createSection(poolName, pulls) {
 
         const row = document.createElement("tr");
 
-		if (pull.rarity == 6) row.classList.add("six");
+        if (pull.rarity == 6) row.classList.add("six");
         if (pull.rarity == 5) row.classList.add("five");
         if (pull.rarity == 4) row.classList.add("four");
 
         const date = new Date(Number(pull.gachaTs));
-        const formattedDate = date.toLocaleString();
+        const formatted = date.toLocaleString();
 
-        row.innerHTML = `
-            <td>${index + 1}</td>
-            <td>${formattedDate}</td>
-            <td>${pull.charName}</td>
-            <td>${pull.rarity}★</td>
-            <td>${pull.seqId}</td>
-        `;
+        row.innerHTML =
+            "<td>" + (index + 1) + "</td>" +
+            "<td>" + formatted + "</td>" +
+            "<td>" + (pull.charName || "-") + "</td>" +
+            "<td>" + (pull.rarity || "-") + "★</td>" +
+            "<td>" + (pull.seqId || "-") + "</td>";
 
         tbody.appendChild(row);
     });
@@ -171,6 +229,4 @@ function createSection(poolName, pulls) {
 </script>
 
 </body>
-
 </html>
-
