@@ -67,6 +67,8 @@ tr.four { background: rgba(138,43,226,0.15); }
 const fileInput = document.getElementById('fileInput');
 const content = document.getElementById('content');
 
+const STORAGE_KEY = "endfield_pulls";
+
 fileInput.addEventListener('change', function() {
     const file = this.files[0];
     if (!file) return;
@@ -74,20 +76,56 @@ fileInput.addEventListener('change', function() {
     const reader = new FileReader();
     reader.onload = function(e) {
         const json = JSON.parse(e.target.result);
-        const pulls = json.data?.list || json;
-        render(pulls);
+        const newPulls = json.data?.list || json;
+
+        mergeAndSave(newPulls);
+        render(loadFromStorage());
     };
     reader.readAsText(file);
 });
+
+function loadFromStorage() {
+    const data = localStorage.getItem(STORAGE_KEY);
+    return data ? JSON.parse(data) : [];
+}
+
+function saveToStorage(data) {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+}
+
+function mergeAndSave(newPulls) {
+
+    let existing = loadFromStorage();
+
+    // создаём Set из уже существующих seqId
+    const existingIds = new Set(existing.map(p => p.seqId));
+
+    let added = 0;
+
+    newPulls.forEach(pull => {
+        if (!existingIds.has(pull.seqId)) {
+            existing.push(pull);
+            added++;
+        }
+    });
+
+    saveToStorage(existing);
+
+    alert("Добавлено новых круток: " + added);
+}
 
 function render(data) {
 
     content.innerHTML = "";
 
-    // сортировка по seqId
+    if (data.length === 0) {
+        content.innerHTML = "<p>Нет сохранённых круток</p>";
+        return;
+    }
+
+    // сортировка по seqId снизу вверх
     data.sort((a,b) => Number(a.seqId) - Number(b.seqId));
 
-    // группировка по poolName
     const pools = {};
     data.forEach(pull => {
         if (!pools[pull.poolName]) {
@@ -111,35 +149,29 @@ function createSection(poolName, pulls) {
     section.appendChild(title);
 
     let total = pulls.length;
-    let fiveStars = 0;
-
-    pulls.forEach(p => {
-        if (p.rarity == 5) fiveStars++;
-    });
+    let fiveStars = pulls.filter(p => p.rarity == 5).length;
 
     const stats = document.createElement("div");
     stats.className = "stats";
-    stats.innerHTML = `
-        Всего круток: <b>${total}</b> |
-        5★: <b>${fiveStars}</b> |
-        Средний 5★: <b>${fiveStars ? (total / fiveStars).toFixed(1) : "-"}</b>
-    `;
+    stats.innerHTML = 
+        Всего: <b>${total}</b> |
+        5★: <b>${fiveStars}</b>
+    ;
     section.appendChild(stats);
 
     const table = document.createElement("table");
-
-    table.innerHTML = `
+    table.innerHTML = 
         <thead>
             <tr>
                 <th>#</th>
                 <th>Дата</th>
                 <th>Персонаж</th>
-                <th>Редкость</th>
+                <th>★</th>
                 <th>SeqID</th>
             </tr>
         </thead>
         <tbody></tbody>
-    `;
+    ;
 
     const tbody = table.querySelector("tbody");
 
@@ -147,20 +179,20 @@ function createSection(poolName, pulls) {
 
         const row = document.createElement("tr");
 
-		if (pull.rarity == 6) row.classList.add("six");
+        if (pull.rarity == 6) row.classList.add("six");
         if (pull.rarity == 5) row.classList.add("five");
         if (pull.rarity == 4) row.classList.add("four");
 
         const date = new Date(Number(pull.gachaTs));
         const formattedDate = date.toLocaleString();
 
-        row.innerHTML = `
+        row.innerHTML = 
             <td>${index + 1}</td>
             <td>${formattedDate}</td>
             <td>${pull.charName}</td>
             <td>${pull.rarity}★</td>
             <td>${pull.seqId}</td>
-        `;
+        ;
 
         tbody.appendChild(row);
     });
@@ -168,7 +200,11 @@ function createSection(poolName, pulls) {
     section.appendChild(table);
     content.appendChild(section);
 }
+
+// при загрузке страницы — показать сохранённые данные
+render(loadFromStorage());
 </script>
 
 </body>
+
 </html>
